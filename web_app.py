@@ -11,7 +11,7 @@ from claude_agent_sdk import (
     TextBlock,
 )
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
@@ -21,7 +21,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-STATIC_DIR = Path(__file__).parent / "static"
+# Build React : `cd frontend && npm run build`
+FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
 
 # Conversation partagée pour cette démo mono-utilisateur : un seul
 # ClaudeSDKClient reste connecté pendant toute la vie du serveur.
@@ -46,12 +47,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-
-@app.get("/")
-async def index():
-    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.post("/api/chat")
@@ -91,3 +86,8 @@ async def chat(request: Request):
             yield {"event": "error", "data": str(exc)}
 
     return EventSourceResponse(event_stream())
+
+
+# Monté en dernier : sert le build React (index.html + assets),
+# sans masquer la route /api/chat déclarée au-dessus.
+app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
