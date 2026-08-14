@@ -1,7 +1,13 @@
 import logging
 
 import anyio
-from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ResultMessage,
+    TextBlock,
+    query,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,6 +33,16 @@ async def main():
                 if isinstance(block, TextBlock):
                     logger.info("Réponse reçue (%d caractères)", len(block.text))
                     print(block.text)
+        elif isinstance(message, ResultMessage):
+            logger.info(
+                "Coût : %.6f USD | Durée : %d ms (API : %d ms) | Tours : %d | Erreur : %s",
+                message.total_cost_usd or 0.0,
+                message.duration_ms,
+                message.duration_api_ms,
+                message.num_turns,
+                message.is_error,
+            )
+            logger.info("Usage détaillé : %s", message.usage)
 
     logger.info("Terminé.")
 
