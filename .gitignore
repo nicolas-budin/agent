@@ -1,0 +1,15 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# Éditeurs / OS
+.DS_Store
+
+# Claude Code local (settings.local.json est spécifique à la machine)
+.claude/settings.local.json
