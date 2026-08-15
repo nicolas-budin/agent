@@ -15,6 +15,7 @@ from claude_agent_sdk import (
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from numpy import block
 from qdrant_client import QdrantClient, models
 from sse_starlette.sse import EventSourceResponse
 
@@ -98,6 +99,7 @@ async def chat(request: Request):
                 if isinstance(msg, AssistantMessage):
                     for block in msg.content:
                         if isinstance(block, TextBlock):
+                            logger.info("Assistant : %s", block.text)    
                             yield {"event": "text", "data": block.text}
                 elif isinstance(msg, ResultMessage):
                     logger.info(
@@ -115,6 +117,8 @@ async def chat(request: Request):
                             }
                         ),
                     }
+                else:
+                    logger.info("Message : %s", msg)
         except Exception as exc:  # noqa: BLE001 - remonter l'erreur au client web
             logger.exception("Erreur pendant la génération")
             yield {"event": "error", "data": str(exc)}

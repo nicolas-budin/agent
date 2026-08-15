@@ -25,7 +25,8 @@ export default function App() {
     setSending(true)
     setMessages((prev) => [...prev, { role: 'user', text }])
     bufferRef.current = ''
-    let assistantIndex = -1
+    let assistantStarted = false
+    let assistantText = ''
 
     try {
       const resp = await fetch('/api/chat', {
@@ -55,17 +56,18 @@ export default function App() {
           const { event, data } = parseEvent(part)
 
           if (event === 'text') {
+            // La mutation de assistantStarted/assistantText se fait ici, en
+            // dehors du updater passé à setMessages, pour que ce dernier reste
+            // pur (StrictMode l'invoque deux fois en dev pour vérifier ça).
+            assistantText += data
+            const started = assistantStarted
+            const currentText = assistantText
+            assistantStarted = true
+
             setMessages((prev) => {
+              if (!started) return [...prev, { role: 'assistant', text: currentText }]
               const next = [...prev]
-              if (assistantIndex === -1) {
-                assistantIndex = next.length
-                next.push({ role: 'assistant', text: data })
-              } else {
-                next[assistantIndex] = {
-                  ...next[assistantIndex],
-                  text: next[assistantIndex].text + data,
-                }
-              }
+              next[next.length - 1] = { ...next[next.length - 1], text: currentText }
               return next
             })
           } else if (event === 'done') {
