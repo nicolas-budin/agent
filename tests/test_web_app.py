@@ -54,6 +54,40 @@ def test_chat_streams_text_and_done_events(monkeypatch):
     assert "data: Bonjour" in body
     assert "event: done" in body
     assert '"cost_usd": 0.01' in body
+    assert "event: sources" not in body  # search_docs pas appelé dans ce tour
+
+
+def test_chat_streams_sources_event_when_search_docs_was_used(monkeypatch):
+    fake_messages = [
+        sdk.AssistantMessage(content=[sdk.TextBlock(text="Réponse")], model="claude-test"),
+        sdk.ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="sess-1",
+            total_cost_usd=0.0,
+        ),
+    ]
+
+    class FakeClientWithTool:
+        async def query(self, message):
+            # simule search_docs ayant été appelé (et donc current_sources rempli)
+            # pendant ce tour, avant que la ResultMessage n'arrive.
+            web_app.current_sources.extend(["web_app.py", "index_docs.py"])
+
+        async def receive_response(self):
+            for m in fake_messages:
+                yield m
+
+    monkeypatch.setattr(web_app, "client", FakeClientWithTool())
+
+    client = TestClient(web_app.app)
+    resp = client.post("/api/chat", json={"message": "Comment fonctionne le RAG ?"})
+
+    assert "event: sources" in resp.text
+    assert '["web_app.py", "index_docs.py"]' in resp.text
 
 
 def test_chat_forwards_message_to_client(monkeypatch):
@@ -85,6 +119,7 @@ def test_chat_streams_error_event_on_exception(monkeypatch):
 
 
 async def test_search_docs_returns_formatted_chunks(monkeypatch):
+    web_app.current_sources.clear()
     fake_points = [
         SimpleNamespace(payload={"source": "web_app.py", "text": "contenu du chunk 1"}),
         SimpleNamespace(payload={"source": "index_docs.py", "text": "contenu du chunk 2"}),
@@ -110,3 +145,19 @@ async def test_search_docs_handles_no_results(monkeypatch):
     result = await web_app.search_docs.handler({"query": "rien à voir"})
 
     assert result["content"][0]["text"] == "Aucun résultat trouvé."
+
+
+async def test_search_docs_records_sources_without_duplicates(monkeypatch):
+    web_app.current_sources.clear()
+    fake_points = [
+        SimpleNamespace(payload={"source": "web_app.py", "text": "chunk A"}),
+        SimpleNamespace(payload={"source": "web_app.py", "text": "chunk B"}),
+        SimpleNamespace(payload={"source": "index_docs.py", "text": "chunk C"}),
+    ]
+    monkeypatch.setattr(
+        web_app.qdrant, "query_points", lambda **kwargs: SimpleNamespace(points=fake_points)
+    )
+
+    await web_app.search_docs.handler({"query": "test"})
+
+    assert web_app.current_sources == ["web_app.py", "index_docs.py"]

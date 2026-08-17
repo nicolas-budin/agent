@@ -67,6 +67,17 @@ RAG requires a Qdrant instance reachable at `http://localhost:6333` (run separat
 - `POST /api/chat` calls `client.query(message)` then streams `client.receive_response()` back to the browser as **Server-Sent Events** via `sse-starlette`'s `EventSourceResponse`. Event types sent: `text` (one per `TextBlock`), `done` (cost/duration from the final `ResultMessage`), `error`.
 - `StaticFiles(directory=FRONTEND_DIST, html=True)` is mounted at `/` **last**, after the `/api/chat` route — mount order matters here: an earlier mount at `/` would shadow the API route.
 
+### ⚠️ Tool sandboxing footgun: `allowed_tools` alone does NOT restrict tools
+
+`ClaudeAgentOptions.allowed_tools` only **pre-approves** those tools (skips the confirmation prompt) — it does **not** replace or restrict the underlying tool set. Verified by tracing `claude_agent_sdk`'s CLI-arg construction (`_internal/transport/subprocess_cli.py`) and confirmed empirically: with only `allowed_tools=["WebSearch", "mcp__docs__search_docs"]` set (as this file had for a while), the bundled CLI actually executed a real `Bash` command when asked to (verified by matching real wall-clock output), despite `Bash` never being listed anywhere — because the CLI's own default tool set (Bash, Read, Write, Edit, Agent, plus any user-level `~/.claude/` plugins/MCP servers) stays fully active unless separately restricted.
+
+Real restriction requires **all** of:
+- `tools=["WebSearch"]` — the actual base set of *built-in* tools (Bash/Read/Write/Edit/... are excluded by omission; note MCP-provided tools like `mcp__docs__search_docs` are *not* gated by this field — they come from `mcp_servers` + `allowed_tools` instead, so don't list them here too)
+- `strict_mcp_config=True` — ignore MCP servers configured outside this process (user/project `~/.claude/` config)
+- `setting_sources=[]` — ignore user/project/local settings files entirely
+
+Without the fix, a request that can't actually reach a tool doesn't reliably get refused either — in testing, the CLI sometimes fabricated a plausible-looking success (a fake `date` timestamp, a "file created" confirmation for a file that was never written) instead of saying it lacked the tool. After applying the fix, the same prompts got honest refusals. **Never trust a self-reported tool list** (asking Claude "what tools do you have" is unreliable — it can echo tool names mentioned in its own system-prompt instructional text, whether or not those tools are actually wired up) — verify with an action that has an independently checkable result (e.g. compare a requested `date` output against the real wall clock, or check the filesystem after a claimed `Write`).
+
 ### Frontend SSE parsing (`frontend/src/App.jsx`)
 
 The browser can't use the native `EventSource` API because it only supports GET, and this needs POST — so `App.jsx` manually reads `fetch()`'s `ReadableStream` and parses SSE framing by hand. **Known gotcha already fixed here**: `sse-starlette` terminates lines with `\r\n`, not `\n` — the parser normalizes `\r\n` → `\n` before splitting on blank lines. If SSE parsing ever silently stops working after touching this code, check that normalization first.

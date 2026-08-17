@@ -70,6 +70,12 @@ export default function App() {
               next[next.length - 1] = { ...next[next.length - 1], text: currentText }
               return next
             })
+          } else if (event === 'sources') {
+            const sources = JSON.parse(data)
+            setMessages((prev) => [
+              ...prev,
+              { role: 'meta', text: `📄 Sources : ${sources.join(', ')}` },
+            ])
           } else if (event === 'done') {
             const info = JSON.parse(data)
             setMessages((prev) => [
