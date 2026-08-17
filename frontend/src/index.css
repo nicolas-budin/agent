@@ -6,6 +6,39 @@ body {
   padding: 0 1rem;
 }
 h1 { font-size: 1.2rem; }
+.authRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.link-button {
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+.login {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 4rem;
+}
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 100%;
+  max-width: 320px;
+}
+.error {
+  color: #dc2626;
+  font-size: 0.85rem;
+}
 #chat {
   display: flex;
   flex-direction: column;

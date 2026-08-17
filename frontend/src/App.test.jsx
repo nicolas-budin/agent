@@ -33,10 +33,30 @@ function makeSSEResponse(sseText, { chunkSplitIndex } = {}) {
   }
 }
 
+// App appelle GET /api/me au montage avant de rendre le chat : ce helper
+// route chaque fetch vers la bonne fausse réponse selon l'URL, pour que les
+// tests puissent se concentrer sur le comportement de /api/chat.
+function stubFetch({ chat, me = { id: 1, email: 'user@example.com' } } = {}) {
+  return vi.fn((url) => {
+    if (url === '/api/me') {
+      return Promise.resolve(
+        me
+          ? { ok: true, status: 200, json: () => Promise.resolve(me) }
+          : { ok: false, status: 401 }
+      )
+    }
+    if (url === '/api/logout') {
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true }) })
+    }
+    return Promise.resolve(typeof chat === 'function' ? chat(url) : chat)
+  })
+}
+
 async function sendMessage(text) {
   const user = userEvent.setup()
   render(<App />)
-  await user.type(screen.getByPlaceholderText('Écris ton message...'), text)
+  const input = await screen.findByPlaceholderText('Écris ton message...')
+  await user.type(input, text)
   await user.click(screen.getByRole('button', { name: 'Envoyer' }))
 }
 
@@ -50,7 +70,7 @@ describe('App', () => {
       'event: text\r\ndata: Bon\r\n\r\n' +
       'event: text\r\ndata: jour !\r\n\r\n' +
       'event: done\r\ndata: {"cost_usd": 0.0123, "duration_ms": 456}\r\n\r\n'
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSSEResponse(sse)))
+    vi.stubGlobal('fetch', stubFetch({ chat: makeSSEResponse(sse) }))
 
     await sendMessage('Salut')
 
@@ -64,7 +84,7 @@ describe('App', () => {
       'event: text\r\ndata: Réponse.\r\n\r\n' +
       'event: sources\r\ndata: ["web_app.py", "index_docs.py"]\r\n\r\n' +
       'event: done\r\ndata: {"cost_usd": 0.01, "duration_ms": 100}\r\n\r\n'
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSSEResponse(sse)))
+    vi.stubGlobal('fetch', stubFetch({ chat: makeSSEResponse(sse) }))
 
     await sendMessage('Comment fonctionne le RAG ?')
 
@@ -74,7 +94,7 @@ describe('App', () => {
   })
 
   it('affiche un message d’erreur si le serveur répond avec un statut non-ok', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }))
+    vi.stubGlobal('fetch', stubFetch({ chat: { ok: false, status: 500 } }))
 
     await sendMessage('Salut')
 
@@ -83,7 +103,7 @@ describe('App', () => {
 
   it('affiche l’événement error émis par le serveur', async () => {
     const sse = 'event: error\r\ndata: Boom\r\n\r\n'
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSSEResponse(sse)))
+    vi.stubGlobal('fetch', stubFetch({ chat: makeSSEResponse(sse) }))
 
     await sendMessage('Salut')
 
@@ -95,7 +115,10 @@ describe('App', () => {
     // Coupe en plein milieu de la ligne "data: Bonjour !" pour vérifier que
     // bufferRef recolle correctement les deux morceaux avant de parser.
     const cutPoint = sse.indexOf('Bon') + 2
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSSEResponse(sse, { chunkSplitIndex: cutPoint })))
+    vi.stubGlobal(
+      'fetch',
+      stubFetch({ chat: makeSSEResponse(sse, { chunkSplitIndex: cutPoint }) })
+    )
 
     await sendMessage('Salut')
 
@@ -103,12 +126,32 @@ describe('App', () => {
   })
 
   it('n’envoie pas de requête si le champ est vide', async () => {
-    vi.stubGlobal('fetch', vi.fn())
+    vi.stubGlobal('fetch', stubFetch())
     const user = userEvent.setup()
     render(<App />)
 
+    await screen.findByPlaceholderText('Écris ton message...')
     await user.click(screen.getByRole('button', { name: 'Envoyer' }))
 
-    expect(fetch).not.toHaveBeenCalled()
+    expect(fetch.mock.calls.some(([url]) => url === '/api/chat')).toBe(false)
+  })
+
+  it('affiche le formulaire de connexion quand /api/me renvoie 401', async () => {
+    vi.stubGlobal('fetch', stubFetch({ me: null }))
+
+    render(<App />)
+
+    expect(await screen.findByPlaceholderText('Email')).toBeInTheDocument()
+  })
+
+  it('revient au formulaire de connexion après déconnexion', async () => {
+    vi.stubGlobal('fetch', stubFetch())
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByPlaceholderText('Écris ton message...')
+    await user.click(screen.getByRole('button', { name: /Déconnexion/ }))
+
+    expect(await screen.findByPlaceholderText('Email')).toBeInTheDocument()
   })
 })

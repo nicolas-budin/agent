@@ -4,6 +4,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+# Comptes utilisateurs (SQLite) — voir db.py
+users.db*
+
 # Node / frontend
 frontend/node_modules/
 frontend/dist/
