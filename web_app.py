@@ -15,7 +15,6 @@ from claude_agent_sdk import (
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from numpy import block
 from qdrant_client import QdrantClient, models
 from sse_starlette.sse import EventSourceResponse
 

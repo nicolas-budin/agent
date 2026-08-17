@@ -19,11 +19,17 @@ pip install claude-agent-sdk fastapi "uvicorn[standard]" sse-starlette "qdrant-c
 # Run the server (serves API + built frontend from frontend/dist)
 uvicorn web_app:app --reload --port 8123
 
-# Run tests
+# Run tests (mocked, no live server/services needed)
 pytest -v
 # Single test file / test:
 pytest tests/test_web_app.py -v
 pytest tests/test_web_app.py::test_chat_streams_text_and_done_events -v
+
+# Manual browser end-to-end test (requires the app AND Qdrant actually running —
+# not picked up by `pytest`, see the file's docstring)
+pip install playwright && playwright install chromium
+python3 tests/playwright_e2e.py           # headless
+python3 tests/playwright_e2e.py --headed  # watch the browser act
 
 # Rebuild the RAG index (after editing project files you want searchable)
 python3 index_docs.py
@@ -78,3 +84,5 @@ Tests mock both external dependencies rather than hitting them:
 - `web_app.qdrant.query_points` is monkeypatched directly for `search_docs` tests.
 - `TestClient(web_app.app)` is used **without** the `with ... as` context-manager form specifically to avoid triggering FastAPI's `lifespan` (which would spawn a real Claude Code CLI subprocess).
 - `pytest.ini` sets `pythonpath = .` (so root-level modules import cleanly from `tests/`) and `asyncio_mode = auto` (so `async def test_...` needs no `@pytest.mark.asyncio`).
+
+`tests/playwright_e2e.py` is a separate, **unmocked** browser test (real uvicorn + real Qdrant + real Claude Code CLI) — deliberately not named `test_*.py` so `pytest` never auto-collects it; run it directly (see Commands above).
