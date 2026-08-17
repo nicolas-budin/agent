@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 
-function parseEvent(part) {
+export function parseEvent(part) {
   let event = 'message'
   const dataLines = []
   for (const line of part.split('\n')) {

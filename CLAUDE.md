@@ -43,6 +43,7 @@ npm install
 npm run dev      # dev server on :5173, proxies /api/* to :8123 (see vite.config.js)
 npm run build    # outputs to frontend/dist/, served by FastAPI in prod
 npm run lint      # oxlint
+npm test          # vitest (jsdom) — parseEvent unit tests + App component tests
 ```
 
 **Two-server dev workflow**: run `uvicorn` (backend, :8123) and `npm run dev` (frontend, :5173) in parallel terminals. For a single-server setup, run `npm run build` then serve everything through `uvicorn` alone — the backend mounts `frontend/dist` directly.
@@ -81,6 +82,8 @@ Without the fix, a request that can't actually reach a tool doesn't reliably get
 ### Frontend SSE parsing (`frontend/src/App.jsx`)
 
 The browser can't use the native `EventSource` API because it only supports GET, and this needs POST — so `App.jsx` manually reads `fetch()`'s `ReadableStream` and parses SSE framing by hand. **Known gotcha already fixed here**: `sse-starlette` terminates lines with `\r\n`, not `\n` — the parser normalizes `\r\n` → `\n` before splitting on blank lines. If SSE parsing ever silently stops working after touching this code, check that normalization first.
+
+`parseEvent` is exported from `App.jsx` specifically so `parseEvent.test.js` can unit-test the SSE line-parsing logic in isolation. `App.test.jsx` mocks `global.fetch` with a fake `Response` whose `body.getReader()` replays raw `\r\n`-terminated SSE text (optionally split across two `read()` calls, to exercise the `bufferRef` reassembly path) — this is the same shape `sse-starlette` actually produces, not a simplified stand-in.
 
 ### RAG (`index_docs.py` + `search_docs` tool in `web_app.py`)
 

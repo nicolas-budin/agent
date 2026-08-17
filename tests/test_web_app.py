@@ -24,6 +24,36 @@ def make_fake_client(messages):
     return FakeClient()
 
 
+def test_lifespan_configures_secure_agent_options(monkeypatch):
+    """Non-régression : sans tools=["WebSearch"] + strict_mcp_config=True +
+    setting_sources=[], allowed_tools seul ne restreint rien — le CLI garde
+    son jeu d'outils complet (Bash, Read, Write...) et charge les MCP/settings
+    utilisateur (~/.claude/), voir CLAUDE.md § "Tool sandboxing footgun"."""
+    captured = {}
+
+    class FakeClaudeSDKClient:
+        def __init__(self, options=None):
+            captured["options"] = options
+
+        async def connect(self):
+            pass
+
+        async def disconnect(self):
+            pass
+
+    monkeypatch.setattr(web_app, "ClaudeSDKClient", FakeClaudeSDKClient)
+
+    with TestClient(web_app.app):
+        pass  # le lifespan s'exécute à l'entrée/sortie du bloc `with`
+
+    options = captured["options"]
+    assert options is not None, "ClaudeSDKClient n'a jamais été instancié"
+    assert options.tools == ["WebSearch"]
+    assert options.strict_mcp_config is True
+    assert options.setting_sources == []
+    assert "mcp__docs__search_docs" in options.allowed_tools
+
+
 def test_chat_empty_message_returns_400():
     client = TestClient(web_app.app)
     resp = client.post("/api/chat", json={"message": "   "})
