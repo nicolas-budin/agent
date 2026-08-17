@@ -18,6 +18,8 @@ pip install claude-agent-sdk fastapi "uvicorn[standard]" sse-starlette "qdrant-c
 
 # Run the server (serves API + built frontend from frontend/dist)
 uvicorn web_app:app --reload --port 8123
+# .vscode/launch.json has a matching debugpy config ("Python: web_app (uvicorn debug)")
+# for launching the same command under the VSCode debugger
 
 # Run tests (mocked, no live server/services needed)
 pytest -v
@@ -44,6 +46,7 @@ npm run dev      # dev server on :5173, proxies /api/* to :8123 (see vite.config
 npm run build    # outputs to frontend/dist/, served by FastAPI in prod
 npm run lint      # oxlint
 npm test          # vitest (jsdom) — parseEvent unit tests + App component tests
+npm run preview   # serve the built frontend/dist locally, without the FastAPI backend
 ```
 
 **Two-server dev workflow**: run `uvicorn` (backend, :8123) and `npm run dev` (frontend, :5173) in parallel terminals. For a single-server setup, run `npm run build` then serve everything through `uvicorn` alone — the backend mounts `frontend/dist` directly.
@@ -64,8 +67,8 @@ RAG requires a Qdrant instance reachable at `http://localhost:6333` (run separat
 
 ### Backend request flow (`web_app.py`)
 
-- A single `ClaudeSDKClient` is created once in FastAPI's `lifespan` and kept connected for the server's entire lifetime — this is a **mono-user demo**: all browser tabs share one Claude conversation/session, there is no per-user session isolation.
-- `POST /api/chat` calls `client.query(message)` then streams `client.receive_response()` back to the browser as **Server-Sent Events** via `sse-starlette`'s `EventSourceResponse`. Event types sent: `text` (one per `TextBlock`), `done` (cost/duration from the final `ResultMessage`), `error`.
+- A single `ClaudeSDKClient` is created once in FastAPI's `lifespan` and kept connected for the server's entire lifetime — this is a **mono-user demo**: all browser tabs share one Claude conversation/session, there is no per-user session isolation. `current_sources` (see below) is a second module-level global with the same caveat.
+- `POST /api/chat` calls `client.query(message)` then streams `client.receive_response()` back to the browser as **Server-Sent Events** via `sse-starlette`'s `EventSourceResponse`. Event types sent: `text` (one per `TextBlock`), `sources` (JSON list of doc paths, emitted before `done` whenever `search_docs` returned results — rendered by the frontend as "📄 Sources : ..."), `done` (cost/duration from the final `ResultMessage`), `error`.
 - `StaticFiles(directory=FRONTEND_DIST, html=True)` is mounted at `/` **last**, after the `/api/chat` route — mount order matters here: an earlier mount at `/` would shadow the API route.
 
 ### ⚠️ Tool sandboxing footgun: `allowed_tools` alone does NOT restrict tools
@@ -96,7 +99,8 @@ The browser can't use the native `EventSource` API because it only supports GET,
 Tests mock both external dependencies rather than hitting them:
 - `web_app.client` (the `ClaudeSDKClient`) is monkeypatched with a fake object implementing async `query()`/`receive_response()`, constructed from the real `claude_agent_sdk` dataclasses (`AssistantMessage`, `TextBlock`, `ResultMessage`) since the route code does `isinstance()` checks against them.
 - `web_app.qdrant.query_points` is monkeypatched directly for `search_docs` tests.
-- `TestClient(web_app.app)` is used **without** the `with ... as` context-manager form specifically to avoid triggering FastAPI's `lifespan` (which would spawn a real Claude Code CLI subprocess).
+- `TestClient(web_app.app)` is used **without** the `with ... as` context-manager form specifically to avoid triggering FastAPI's `lifespan` (which would spawn a real Claude Code CLI subprocess) — with one deliberate exception: `test_lifespan_configures_secure_agent_options` in `tests/test_web_app.py` *does* use `with TestClient(...)` to trigger `lifespan` and assert on the constructed `ClaudeAgentOptions`, since it's the test that actually guards the tool-sandboxing fix documented above. It avoids a real subprocess by monkeypatching `web_app.ClaudeSDKClient` itself, not just `web_app.client`.
 - `pytest.ini` sets `pythonpath = .` (so root-level modules import cleanly from `tests/`) and `asyncio_mode = auto` (so `async def test_...` needs no `@pytest.mark.asyncio`).
+- `tests/test_index_docs.py` unit-tests `chunk_text()` directly (empty/whitespace input, paragraph merging, max-char splitting, whitespace stripping) — pure logic, no mocking and no Qdrant/CLI dependency needed.
 
 `tests/playwright_e2e.py` is a separate, **unmocked** browser test (real uvicorn + real Qdrant + real Claude Code CLI) — deliberately not named `test_*.py` so `pytest` never auto-collects it; run it directly (see Commands above).
