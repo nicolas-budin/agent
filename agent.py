@@ -8,6 +8,7 @@ from qdrant_client import QdrantClient, models
 
 logger = logging.getLogger(__name__)
 
+
 # RAG : voir index_docs.py pour l'indexation de la collection Qdrant.
 QDRANT_COLLECTION = "claude_demo_docs"
 EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
