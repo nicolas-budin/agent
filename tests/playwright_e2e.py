@@ -1,9 +1,8 @@
 """Test end-to-end manuel du chat, piloté par un vrai navigateur (Playwright).
 
-Contrairement à test_web_app.py (qui mocke ClaudeSDKClient et Qdrant), ce
-script tape sur l'application réellement démarrée — il faut donc :
+Contrairement à test_web_app.py (qui mocke ClaudeSDKClient), ce script tape
+sur l'application réellement démarrée — il faut donc :
   - uvicorn web_app:app qui tourne sur http://127.0.0.1:8000
-  - Qdrant accessible sur localhost:6333
   - une session Claude Code authentifiée
 
 Pas nommé test_*.py exprès : pytest ne le ramasse pas automatiquement dans

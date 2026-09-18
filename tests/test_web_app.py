@@ -1,6 +1,6 @@
 import asyncio
+import threading
 from collections import defaultdict
-from types import SimpleNamespace
 
 import claude_agent_sdk as sdk
 import pytest
@@ -54,7 +54,6 @@ def test_build_agent_options_is_hardened():
     assert options.tools == ["WebSearch"]
     assert options.strict_mcp_config is True
     assert options.setting_sources == []
-    assert "mcp__docs__search_docs" in options.allowed_tools
 
 
 async def test_get_or_create_client_isolates_users(monkeypatch):
@@ -82,6 +81,60 @@ async def test_get_or_create_client_isolates_users(monkeypatch):
     assert client_1a is not client_2, "deux utilisateurs doivent avoir des clients isolés"
     assert len(captured) == 2
     assert all(o.strict_mcp_config is True for o in captured)
+
+
+def test_chat_connects_new_user_without_deadlocking(monkeypatch, authenticated):
+    """Non-régression : get_or_create_client() ne doit pas ré-acquérir
+    get_user_lock(user_id) en interne. web_app.chat() tient déjà ce verrou
+    pour tout le tour ; asyncio.Lock n'étant pas réentrant, un double-acquire
+    ici bloquait indéfiniment le tout premier message de chaque utilisateur."""
+
+    class FakeClaudeSDKClient:
+        def __init__(self, options=None):
+            pass
+
+        async def connect(self):
+            pass
+
+        async def query(self, message):
+            pass
+
+        async def receive_response(self):
+            yield sdk.ResultMessage(
+                subtype="success",
+                duration_ms=1,
+                duration_api_ms=1,
+                is_error=False,
+                num_turns=1,
+                session_id="sess-1",
+                total_cost_usd=0.0,
+            )
+
+        async def disconnect(self):
+            pass
+
+    monkeypatch.setattr(agent, "ClaudeSDKClient", FakeClaudeSDKClient)
+    monkeypatch.setattr(agent, "_clients", {})
+    monkeypatch.setattr(agent, "_locks", defaultdict(asyncio.Lock))
+
+    client = TestClient(web_app.app)
+    result = {}
+
+    def run():
+        result["resp"] = client.post("/api/chat", json={"message": "Bonjour"})
+
+    # Thread daemon : si le deadlock revient, il reste bloqué pour toujours,
+    # mais un thread daemon n'empêche pas le process pytest de se terminer
+    # (contrairement à un ThreadPoolExecutor, dont __exit__ attendrait le
+    # thread indéfiniment).
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(timeout=5)
+
+    assert not thread.is_alive(), "chat() a deadlocké sur le premier message d'un nouvel utilisateur"
+    resp = result["resp"]
+    assert resp.status_code == 200
+    assert "event: done" in resp.text
 
 
 def test_chat_requires_authentication():
@@ -120,40 +173,6 @@ def test_chat_streams_text_and_done_events(monkeypatch, authenticated):
     assert "data: Bonjour" in body
     assert "event: done" in body
     assert '"cost_usd": 0.01' in body
-    assert "event: sources" not in body  # search_docs pas appelé dans ce tour
-
-
-def test_chat_streams_sources_event_when_search_docs_was_used(monkeypatch, authenticated):
-    fake_messages = [
-        sdk.AssistantMessage(content=[sdk.TextBlock(text="Réponse")], model="claude-test"),
-        sdk.ResultMessage(
-            subtype="success",
-            duration_ms=1,
-            duration_api_ms=1,
-            is_error=False,
-            num_turns=1,
-            session_id="sess-1",
-            total_cost_usd=0.0,
-        ),
-    ]
-
-    class FakeClientWithTool:
-        async def query(self, message):
-            # simule search_docs ayant été appelé (et donc current_sources_var
-            # rempli) pendant ce tour, avant que la ResultMessage n'arrive.
-            agent.current_sources_var.get().extend(["web_app.py", "index_docs.py"])
-
-        async def receive_response(self):
-            for m in fake_messages:
-                yield m
-
-    stub_client(monkeypatch, FakeClientWithTool())
-
-    client = TestClient(web_app.app)
-    resp = client.post("/api/chat", json={"message": "Comment fonctionne le RAG ?"})
-
-    assert "event: sources" in resp.text
-    assert '["web_app.py", "index_docs.py"]' in resp.text
 
 
 def test_chat_forwards_message_to_client(monkeypatch, authenticated):
@@ -182,48 +201,3 @@ def test_chat_streams_error_event_on_exception(monkeypatch, authenticated):
 
     assert "event: error" in resp.text
     assert "boom" in resp.text
-
-
-async def test_search_docs_returns_formatted_chunks(monkeypatch):
-    agent.current_sources_var.set([])
-    fake_points = [
-        SimpleNamespace(payload={"source": "web_app.py", "text": "contenu du chunk 1"}),
-        SimpleNamespace(payload={"source": "index_docs.py", "text": "contenu du chunk 2"}),
-    ]
-    monkeypatch.setattr(
-        agent.qdrant, "query_points", lambda **kwargs: SimpleNamespace(points=fake_points)
-    )
-
-    result = await agent.search_docs.handler({"query": "test"})
-
-    text = result["content"][0]["text"]
-    assert "[web_app.py]" in text
-    assert "contenu du chunk 1" in text
-    assert "[index_docs.py]" in text
-    assert "contenu du chunk 2" in text
-
-
-async def test_search_docs_handles_no_results(monkeypatch):
-    monkeypatch.setattr(
-        agent.qdrant, "query_points", lambda **kwargs: SimpleNamespace(points=[])
-    )
-
-    result = await agent.search_docs.handler({"query": "rien à voir"})
-
-    assert result["content"][0]["text"] == "Aucun résultat trouvé."
-
-
-async def test_search_docs_records_sources_without_duplicates(monkeypatch):
-    agent.current_sources_var.set([])
-    fake_points = [
-        SimpleNamespace(payload={"source": "web_app.py", "text": "chunk A"}),
-        SimpleNamespace(payload={"source": "web_app.py", "text": "chunk B"}),
-        SimpleNamespace(payload={"source": "index_docs.py", "text": "chunk C"}),
-    ]
-    monkeypatch.setattr(
-        agent.qdrant, "query_points", lambda **kwargs: SimpleNamespace(points=fake_points)
-    )
-
-    await agent.search_docs.handler({"query": "test"})
-
-    assert agent.current_sources_var.get() == ["web_app.py", "index_docs.py"]

@@ -79,20 +79,6 @@ describe('App', () => {
     expect(screen.getByText('Coût : $0.012300 · 456 ms')).toBeInTheDocument()
   })
 
-  it('affiche les sources RAG quand l’événement sources est reçu', async () => {
-    const sse =
-      'event: text\r\ndata: Réponse.\r\n\r\n' +
-      'event: sources\r\ndata: ["web_app.py", "index_docs.py"]\r\n\r\n' +
-      'event: done\r\ndata: {"cost_usd": 0.01, "duration_ms": 100}\r\n\r\n'
-    vi.stubGlobal('fetch', stubFetch({ chat: makeSSEResponse(sse) }))
-
-    await sendMessage('Comment fonctionne le RAG ?')
-
-    await waitFor(() =>
-      expect(screen.getByText('📄 Sources : web_app.py, index_docs.py')).toBeInTheDocument()
-    )
-  })
-
   it('affiche un message d’erreur si le serveur répond avec un statut non-ok', async () => {
     vi.stubGlobal('fetch', stubFetch({ chat: { ok: false, status: 500 } }))
 

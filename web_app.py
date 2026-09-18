@@ -45,7 +45,6 @@ async def chat(request: Request, user: db.UserRecord = Depends(auth.get_current_
 
     async def event_stream():
         logger.info("Message reçu (user_id=%s) : %s", user.id, message)
-        agent.current_sources_var.set([])
         async with agent.get_user_lock(user.id):
             client = await agent.get_or_create_client(user.id)
             try:
@@ -62,10 +61,6 @@ async def chat(request: Request, user: db.UserRecord = Depends(auth.get_current_
                             msg.duration_ms,
                             msg.num_turns,
                         )
-                        sources = agent.current_sources_var.get()
-                        if sources:
-                            logger.info("Sources RAG utilisées : %s", sources)
-                            yield {"event": "sources", "data": json.dumps(sources)}
                         yield {
                             "event": "done",
                             "data": json.dumps(
