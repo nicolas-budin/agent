@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
-import LoginForm from './LoginForm.jsx'
+import { useRef, useState } from 'react'
 
 export function parseEvent(part) {
   let event = 'message'
@@ -12,25 +11,10 @@ export function parseEvent(part) {
 }
 
 export default function App() {
-  const [checkingAuth, setCheckingAuth] = useState(true)
-  const [user, setUser] = useState(null)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const bufferRef = useRef('')
-
-  useEffect(() => {
-    fetch('/api/me')
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setUser)
-      .finally(() => setCheckingAuth(false))
-  }, [])
-
-  async function logout() {
-    await fetch('/api/logout', { method: 'POST' })
-    setUser(null)
-    setMessages([])
-  }
 
   async function sendMessage(e) {
     e.preventDefault()
@@ -102,17 +86,9 @@ export default function App() {
     }
   }
 
-  if (checkingAuth) return null
-  if (!user) return <LoginForm onAuthenticated={setUser} />
-
   return (
     <>
-      <div className="authRow">
-        <h1>💬 Claude SDK Client — conversation multi-tours</h1>
-        <button type="button" className="link-button" onClick={logout}>
-          {user.email} · Déconnexion
-        </button>
-      </div>
+      <h1>💬 Claude SDK Client — conversation multi-tours</h1>
       <div id="chat">
         {messages.map((m, i) => (
           <div key={i} className={m.role === 'meta' ? 'meta' : `msg ${m.role}`}>

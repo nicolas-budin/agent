@@ -1,16 +1,15 @@
 import asyncio
 import logging
-from collections import defaultdict
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
 logger = logging.getLogger(__name__)
 
-# Un ClaudeSDKClient isolé par utilisateur (clé : user_id), créé
-# paresseusement au premier message pour ne pas payer le coût de spawn du
-# CLI sur la requête de login.
-_clients: dict[int, ClaudeSDKClient] = {}
-_locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+# Un unique ClaudeSDKClient partagé par tous les visiteurs, créé
+# paresseusement au premier message (pas au démarrage du serveur) pour ne
+# pas payer le coût de spawn du CLI avant qu'il ne serve à quelque chose.
+_client: ClaudeSDKClient | None = None
+_lock = asyncio.Lock()
 
 
 def build_agent_options() -> ClaudeAgentOptions:
@@ -29,25 +28,26 @@ def build_agent_options() -> ClaudeAgentOptions:
     )
 
 
-def get_user_lock(user_id: int) -> asyncio.Lock:
-    return _locks[user_id]
+def get_lock() -> asyncio.Lock:
+    return _lock
 
 
-async def get_or_create_client(user_id: int) -> ClaudeSDKClient:
-    # Suppose que l'appelant tient déjà get_user_lock(user_id) (c'est le cas
-    # de web_app.chat(), qui l'acquiert pour tout le tour) : asyncio.Lock
-    # n'étant pas réentrant, le reprendre ici causerait un deadlock au
-    # premier message de chaque utilisateur.
-    if user_id not in _clients:
-        c = ClaudeSDKClient(options=build_agent_options())
-        await c.connect()
-        _clients[user_id] = c
-        logger.info("Client Claude connecté pour user_id=%s", user_id)
-    return _clients[user_id]
+async def get_or_create_client() -> ClaudeSDKClient:
+    # Suppose que l'appelant tient déjà get_lock() (c'est le cas de
+    # web_app.chat(), qui l'acquiert pour tout le tour) : asyncio.Lock
+    # n'étant pas réentrant, le reprendre ici causerait un deadlock au tout
+    # premier message.
+    global _client
+    if _client is None:
+        _client = ClaudeSDKClient(options=build_agent_options())
+        await _client.connect()
+        logger.info("Client Claude connecté")
+    return _client
 
 
-async def disconnect_all_clients() -> None:
-    for user_id, c in list(_clients.items()):
-        await c.disconnect()
-        logger.info("Client Claude déconnecté pour user_id=%s", user_id)
-    _clients.clear()
+async def disconnect_client() -> None:
+    global _client
+    if _client is not None:
+        await _client.disconnect()
+        logger.info("Client Claude déconnecté")
+        _client = None

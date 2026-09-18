@@ -4,14 +4,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
-from fastapi import Depends, FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
 import agent
-import auth
-import db
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,28 +23,26 @@ FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    db.init_db()
     try:
         yield
     finally:
-        await agent.disconnect_all_clients()
+        await agent.disconnect_client()
 
 
 app = FastAPI(lifespan=lifespan)
-app.include_router(auth.router)
 
 
 @app.post("/api/chat")
-async def chat(request: Request, user: db.UserRecord = Depends(auth.get_current_user)):
+async def chat(request: Request):
     body = await request.json()
     message = (body.get("message") or "").strip()
     if not message:
         return JSONResponse({"error": "message vide"}, status_code=400)
 
     async def event_stream():
-        logger.info("Message reçu (user_id=%s) : %s", user.id, message)
-        async with agent.get_user_lock(user.id):
-            client = await agent.get_or_create_client(user.id)
+        logger.info("Message reçu : %s", message)
+        async with agent.get_lock():
+            client = await agent.get_or_create_client()
             try:
                 await client.query(message)
                 async for msg in client.receive_response():
@@ -78,5 +74,5 @@ async def chat(request: Request, user: db.UserRecord = Depends(auth.get_current_
 
 
 # Monté en dernier : sert le build React (index.html + assets),
-# sans masquer les routes /api/* déclarées au-dessus.
+# sans masquer la route /api/chat déclarée au-dessus.
 app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
